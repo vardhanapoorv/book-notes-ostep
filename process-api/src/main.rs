@@ -1,10 +1,12 @@
-use libc::{_exit, close, pipe, read, write};
-use nix::libc::waitpid;
-use nix::unistd::{fork, ForkResult};
+use libc::{_exit, close, read, write};
+use nix::libc::{dup2, execl, execle, execlp, execv, wait, waitpid, STDIN_FILENO, STDOUT_FILENO};
+use nix::unistd::{fork, pipe, ForkResult};
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::os::fd::IntoRawFd;
 use std::process;
+use std::ptr;
 use std::ptr::null_mut;
 
 fn fork_child_parent_separate_address_space() {
@@ -90,7 +92,7 @@ fn fork_child_print_before_parent() {
     }
 }
 
-fn fork_child_print_before_parent_with_pipe() {
+/*fn fork_child_print_before_parent_with_pipe() {
     let mut pipefd = [0; 2]; // Create an array to hold pipe file descriptors
 
     // Create a pipe
@@ -131,11 +133,181 @@ fn fork_child_print_before_parent_with_pipe() {
             println!("goodbye"); // Perform the parent's task
         }
     }
+}*/
+
+fn fork_exec_variants() {
+    let path = CString::new("/bin/ls").expect("CString::new failed");
+    let arg0 = CString::new("ls").expect("CString::new failed");
+    let cmd = CString::new("ls").expect("CString::new failed");
+    let arg = CString::new("-l").expect("CString::new failed");
+    let env = CString::new("PATH=/usr/bin").expect("CString::new failed");
+    let envp = [env.as_ptr(), std::ptr::null()];
+    let args = [arg0.as_ptr(), ptr::null()];
+
+    // let args_ref: Vec<&CString> = args.iter().collect();
+    unsafe {
+        let pid = libc::fork();
+        if pid < 0 {
+            eprintln!("Fork failed");
+            process::exit(1);
+        } else if pid == 0 {
+            // Child process
+            // execl(path.as_ptr(), arg0.as_ptr(), ptr::null::<i8>());
+            /*execle(
+                path.as_ptr(),
+                arg0.as_ptr(),
+                ptr::null::<i8>(),
+                // envp.as_ptr(),
+            );*/
+            // execlp(cmd.as_ptr(), cmd.as_ptr(), arg.as_ptr(), ptr::null::<i8>());
+            execv(path.as_ptr(), args.as_ptr());
+        } else {
+            // Parent process
+            waitpid(pid, null_mut(), 0);
+        }
+    }
+}
+
+fn fork_child_wait() {
+    unsafe {
+        let pid = libc::fork();
+        if pid < 0 {
+            eprintln!("Fork failed");
+            process::exit(1);
+        } else if pid == 0 {
+            // Child process
+            // Wait in child process returns -1 since there is no child process
+            let val = wait(null_mut());
+            println!("Child process: {}", val);
+            println!("Child process");
+        } else {
+            // Parent process
+            // waitpid(pid, null_mut(), 0);
+            // let val = wait(null_mut());
+            println!("pid = {}", pid);
+            // println!("Parent process: {}", val);
+            println!("Parent process");
+        }
+    }
+}
+
+fn fork_child_waitpid() {
+    unsafe {
+        let pid = libc::fork();
+        if pid < 0 {
+            eprintln!("Fork failed");
+            process::exit(1);
+        } else if pid == 0 {
+            // Child process
+            // Wait in child process returns -1 since there is no child process
+            // let val = waitpid(pid, null_mut(), 0);
+            // println!("Child process: {}", val);
+            println!("Child process");
+        } else {
+            // Parent process
+            // waitpid(pid, null_mut(), 0);
+            let status = 0;
+            let val = waitpid(pid, null_mut(), 0);
+            println!("pid = {}", pid);
+            println!("Parent process: {}", val);
+            println!("Parent process: status of child {}", status);
+            println!("Parent process");
+        }
+    }
+}
+
+fn fork_child_close_std_out() {
+    unsafe {
+        let pid = libc::fork();
+        if pid < 0 {
+            eprintln!("Fork failed");
+            process::exit(1);
+        } else if pid == 0 {
+            // Child process
+            println!("Child process");
+            let result = close(STDOUT_FILENO);
+            if result == 0 {
+                println!("This should not be printed, STDOUT closed successfully");
+            } else {
+                println!("Failed to close STDOUT");
+            }
+        } else {
+            // Parent process
+            waitpid(pid, null_mut(), 0);
+            println!("Parent process");
+        }
+    }
+}
+
+fn fork_two_child_input_pipe_output() {
+    // Create a pipe
+    let (read_end, write_end) = match pipe() {
+        Ok((read_end, write_end)) => (read_end.into_raw_fd(), write_end.into_raw_fd()),
+        Err(err) => {
+            eprintln!("Failed to create pipe: {}", err);
+            process::exit(1);
+        }
+    };
+
+    // Fork the process
+    let pid = unsafe { libc::fork() };
+    if pid < 0 {
+        eprintln!("Fork failed");
+        process::exit(1);
+    } else if pid == 0 {
+        // Child process
+        unsafe {
+            close(read_end);
+            dup2(write_end, STDOUT_FILENO);
+            close(write_end);
+
+            println!("Hello from child 1");
+        }
+    } else {
+        // Parent process
+        unsafe {
+            let pid2 = libc::fork();
+            if pid2 < 0 {
+                eprintln!("Fork failed");
+                process::exit(1);
+            } else if pid2 == 0 {
+                // Child process
+                close(write_end);
+                dup2(read_end, STDIN_FILENO);
+                close(read_end);
+                let mut buffer = [0u8; 128];
+                let nbytes = libc::read(
+                    libc::STDIN_FILENO,
+                    buffer.as_mut_ptr() as *mut libc::c_void,
+                    buffer.len(),
+                );
+
+                if nbytes < 0 {
+                    // Handle error case
+                    eprintln!("Failed to read from standard input.");
+                } else {
+                    // Convert buffer to a readable string
+                    let nbytes = nbytes as usize;
+                    println!(
+                        "Second child received: {}",
+                        String::from_utf8_lossy(&buffer[..nbytes])
+                    );
+                }
+                // Block until the child writes to the pipe
+                // read(pipefd[0], buffer.as_mut_ptr() as *mut _, 4);
+            }
+        }
+    }
 }
 
 fn main() {
     // fork_child_parent_separate_address_space(); // Question 1
     // fork_file_child_parent(); // Question 2
     // fork_child_print_before_parent(); // Question 3
-    fork_child_print_before_parent_with_pipe(); // Question 3 with pipe
+    // fork_child_print_before_parent_with_pipe(); // Question 3 with pipe
+    // fork_exec_variants(); // Question 4
+    // fork_child_wait(); // Question 5
+    // fork_child_waitpid(); // Question 6
+    // fork_child_close_std_out(); // Question 7
+    fork_two_child_input_pipe_output(); // Question 8
 }
