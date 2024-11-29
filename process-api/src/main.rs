@@ -300,6 +300,32 @@ fn fork_two_child_input_pipe_output() {
     }
 }
 
+fn multiple_children() {
+    let n = 3; // Number of child processes to create
+
+    for i in 0..n {
+        match unsafe { fork() } {
+            Ok(ForkResult::Child) => {
+                println!("Child {} created with PID {}", i, nix::unistd::getpid());
+                println!("Parent pid = {}", nix::unistd::getppid());
+                std::process::exit(0); // End child process after creation
+            }
+            Ok(ForkResult::Parent { child }) => {
+                println!("Parent created child {} with PID {}", i, child);
+            }
+            Err(err) => {
+                eprintln!("Fork failed: {}", err);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Parent waits for all child processes to finish
+    for _ in 0..n {
+        let _ = nix::sys::wait::wait();
+    }
+}
+
 fn main() {
     // fork_child_parent_separate_address_space(); // Question 1
     // fork_file_child_parent(); // Question 2
@@ -309,5 +335,6 @@ fn main() {
     // fork_child_wait(); // Question 5
     // fork_child_waitpid(); // Question 6
     // fork_child_close_std_out(); // Question 7
-    fork_two_child_input_pipe_output(); // Question 8
+    // fork_two_child_input_pipe_output(); // Question 8
+    multiple_children();
 }

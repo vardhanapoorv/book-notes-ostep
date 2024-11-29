@@ -7,3 +7,6 @@ This repository contains my notes -
 - [Introduction to Operating Systems](./Introduction.pdf)
 - [Virtualization - The Abstraction: The Process](./Virtualization-The-Abstraction-The-Process.pdf)
 - [Homework - The Abstraction: The Process](./Homework-Abstraction-Process.pdf)
+- [Interlude - Process API](./Interlude-Process-API.pdf)
+- [Homework - Interlude: Process API](./Homework-Interlude-Process-API.pdf)
+- [Homework - Scheduling: Introduction](./Homework-Scheduling.pdf)
