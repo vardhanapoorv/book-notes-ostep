@@ -1,9 +1,22 @@
-use libc::{sysconf, _SC_PAGESIZE};
+use libc::{pthread_self, pthread_threadid_np, sysconf, _SC_PAGESIZE};
 use std::env;
 use std::ptr;
 use std::time::Instant;
 
+// Function to get the current thread ID for migration tracking
+#[cfg(target_os = "macos")]
+fn get_thread_id() -> u64 {
+    let mut tid: u64 = 0;
+    unsafe {
+        pthread_threadid_np(pthread_self(), &mut tid);
+    }
+    tid
+}
+
 fn main() {
+    // Get initial thread ID for migration tracking
+    #[cfg(target_os = "macos")]
+    let initial_tid = get_thread_id();
     // Read command-line arguments
     let args: Vec<String> = env::args().collect();
     if args.len() != 3 {
@@ -37,6 +50,19 @@ fn main() {
         }
     }
     let duration = start.elapsed();
+
+    // Get final thread ID for migration tracking
+    #[cfg(target_os = "macos")]
+    let final_tid = get_thread_id();
+
+    if initial_tid != final_tid {
+        eprintln!(
+            "⚠️ WARNING: Thread migrated during execution! (Initial: {}, Final: {})",
+            initial_tid, final_tid
+        );
+    } else {
+        println!("✅ No CPU migration detected. Thread remained on core 0.");
+    }
 
     // Output results
     let total_accesses = num_pages * num_trials;
